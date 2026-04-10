@@ -1291,9 +1291,12 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 	serverAddr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Starting REST API server on %s...\n", serverAddr)
 
-	// Create server with timeouts for stability
+	// Create server with timeouts for stability.
+	// Handler is wrapped in bearerAuthMiddleware so every route (except
+	// /api/health) requires Authorization: Bearer <BRIDGE_AUTH_TOKEN>.
 	server := &http.Server{
 		Addr:         serverAddr,
+		Handler:      bearerAuthMiddleware(http.DefaultServeMux),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 60 * time.Second, // Longer for media downloads
 		IdleTimeout:  120 * time.Second,

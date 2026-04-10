@@ -1,25 +1,24 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 )
 
-// WebhookPayload represents the data sent to the webhook
+// WebhookPayload represents the data sent to the webhook.
 type WebhookPayload struct {
-	Sender           string `json:"sender"`
-	Content          string `json:"content"`
-	ChatJID          string `json:"chatJID"`
-	IsFromMe         bool   `json:"isFromMe"`
-	QuotedMessageId  string `json:"quotedMessageId,omitempty"`
-	QuotedSender     string `json:"quotedSender,omitempty"`
-	QuotedContent    string `json:"quotedContent,omitempty"`
+	Sender          string `json:"sender"`
+	Content         string `json:"content"`
+	ChatJID         string `json:"chatJID"`
+	IsFromMe        bool   `json:"isFromMe"`
+	QuotedMessageId string `json:"quotedMessageId,omitempty"`
+	QuotedSender    string `json:"quotedSender,omitempty"`
+	QuotedContent   string `json:"quotedContent,omitempty"`
 }
 
-// SendWebhook sends a message to the webhook endpoint
+// SendWebhook sends a message to the webhook endpoint with HMAC signing
+// and retry (see postWebhookWithRetry in middleware.go).
 func SendWebhook(sender, content, chatJID string, isFromMe bool, quotedMessageId, quotedSender, quotedContent string) {
 	webhookURL := os.Getenv("WEBHOOK_URL")
 	if webhookURL == "" {
@@ -42,18 +41,11 @@ func SendWebhook(sender, content, chatJID string, isFromMe bool, quotedMessageId
 		return
 	}
 
-	resp, err := http.Post(webhookURL, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		fmt.Printf("Error sending webhook: %v\n", err)
+	if err := postWebhookWithRetry(webhookURL, jsonData); err != nil {
+		fmt.Printf("⚠ Webhook delivery failed for message from %s: %v\n", sender, err)
 		return
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == 200 {
-		fmt.Printf("✓ Webhook sent for message from %s\n", sender)
-	} else {
-		fmt.Printf("⚠ Webhook failed with status %d\n", resp.StatusCode)
-	}
+	fmt.Printf("✓ Webhook sent for message from %s\n", sender)
 }
 
 // In main.go, handleMessage forwards webhooks for messages with text content.
