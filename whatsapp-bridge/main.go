@@ -510,14 +510,20 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 
 	// Check if we have media to send
 	if mediaPath != "" {
+		// Validate media_path to prevent directory traversal
+		cleanPath := filepath.Clean(mediaPath)
+		if strings.Contains(cleanPath, "..") {
+			return false, "invalid media path: directory traversal not allowed"
+		}
+
 		// Read media file
-		mediaData, err := os.ReadFile(mediaPath)
+		mediaData, err := os.ReadFile(cleanPath)
 		if err != nil {
 			return false, fmt.Sprintf("Error reading media file: %v", err)
 		}
 
 		// Determine media type and mime type based on file extension
-		fileExt := strings.ToLower(mediaPath[strings.LastIndex(mediaPath, ".")+1:])
+		fileExt := strings.ToLower(cleanPath[strings.LastIndex(cleanPath, ".")+1:])
 		var mediaType whatsmeow.MediaType
 		var mimeType string
 
@@ -623,7 +629,7 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 			}
 		case whatsmeow.MediaDocument:
 			msg.DocumentMessage = &waProto.DocumentMessage{
-				Title:         proto.String(mediaPath[strings.LastIndex(mediaPath, "/")+1:]),
+				Title:         proto.String(cleanPath[strings.LastIndex(cleanPath, "/")+1:]),
 				Caption:       proto.String(message),
 				Mimetype:      proto.String(mimeType),
 				URL:           &resp.URL,
@@ -859,9 +865,9 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 
 		// Log based on message type
 		if mediaType != "" {
-			fmt.Printf("[%s] %s %s: [%s: %s] %s\n", timestamp, direction, sender, mediaType, filename, content)
+			fmt.Printf("[%s] %s %s: [%s: %s] (len=%d)\n", timestamp, direction, sender, mediaType, filename, len(content))
 		} else if content != "" {
-			fmt.Printf("[%s] %s %s: %s\n", timestamp, direction, sender, content)
+			fmt.Printf("[%s] %s %s (len=%d)\n", timestamp, direction, sender, len(content))
 		}
 	}
 }
@@ -1083,9 +1089,31 @@ func extractDirectPathFromURL(url string) string {
 	return "/" + pathPart
 }
 
+// authMiddleware returns an HTTP handler that checks for a valid Bearer token
+// before delegating to the wrapped handler. If BRIDGE_API_TOKEN is empty the
+// middleware is a no-op (backward compatible).
+func authMiddleware(apiToken string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if apiToken != "" {
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" || authHeader != "Bearer "+apiToken {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+		}
+		next(w, r)
+	}
+}
+
 // Start a REST API server to expose the WhatsApp client functionality
 func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port int) {
-	// Health check endpoint
+	// Read API token for auth middleware
+	apiToken := os.Getenv("BRIDGE_API_TOKEN")
+	if apiToken == "" {
+		fmt.Println("WARNING: BRIDGE_API_TOKEN is not set — REST endpoints are unauthenticated")
+	}
+
+	// Health check endpoint (public, no auth)
 	http.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		status := map[string]interface{}{
@@ -1100,8 +1128,8 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 		_ = json.NewEncoder(w).Encode(status)
 	})
 
-	// Handler for sending messages
-	http.HandleFunc("/api/send", func(w http.ResponseWriter, r *http.Request) {
+	// Handler for sending messages (auth required)
+	http.HandleFunc("/api/send", authMiddleware(apiToken, func(w http.ResponseWriter, r *http.Request) {
 		// Only allow POST requests
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1126,7 +1154,7 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 			return
 		}
 
-		fmt.Println("Received request to send message", req.Message, req.MediaPath)
+		fmt.Printf("Received request to send message (len=%d, media_path=%q)\n", len(req.Message), req.MediaPath)
 
 		// Send the message
 		success, message := sendWhatsAppMessage(client, req.Recipient, req.Message, req.MediaPath)
@@ -1144,10 +1172,10 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 			Success: success,
 			Message: message,
 		})
-	})
+	}))
 
-	// Handler for downloading media
-	http.HandleFunc("/api/download", func(w http.ResponseWriter, r *http.Request) {
+	// Handler for downloading media (auth required)
+	http.HandleFunc("/api/download", authMiddleware(apiToken, func(w http.ResponseWriter, r *http.Request) {
 		// Only allow POST requests
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1209,10 +1237,10 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 			Filename: filename,
 			Path:     path,
 		})
-	})
+	}))
 
-	// Handler for sending typing indicator
-	http.HandleFunc("/api/typing", func(w http.ResponseWriter, r *http.Request) {
+	// Handler for sending typing indicator (auth required)
+	http.HandleFunc("/api/typing", authMiddleware(apiToken, func(w http.ResponseWriter, r *http.Request) {
 		// Only allow POST requests
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1285,10 +1313,10 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 				"message": fmt.Sprintf("Typing indicator set to %v", req.IsTyping),
 			})
 		}
-	})
+	}))
 
 	// Start the server with proper timeouts
-	serverAddr := fmt.Sprintf(":%d", port)
+	serverAddr := fmt.Sprintf("127.0.0.1:%d", port)
 	fmt.Printf("Starting REST API server on %s...\n", serverAddr)
 
 	// Create server with timeouts for stability.
@@ -1741,8 +1769,8 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 					mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength = extractMediaInfo(msg.Message.Message, timestamp)
 				}
 
-				// Log the message content for debugging
-				logger.Infof("Message content: %v, Media Type: %v", content, mediaType)
+				// Log message metadata for debugging (no plaintext content)
+				logger.Infof("Message len=%d, Media Type: %v", len(content), mediaType)
 
 				// Skip messages with no content and no media
 				if content == "" && mediaType == "" {
@@ -1801,11 +1829,11 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 					syncedCount++
 					// Log successful message storage
 					if mediaType != "" {
-						logger.Infof("Stored message: [%s] %s -> %s: [%s: %s] %s",
-							msgTimestamp.Format("2006-01-02 15:04:05"), sender, chatJID, mediaType, filename, content)
+						logger.Infof("Stored message: [%s] %s -> %s: [%s: %s] (len=%d)",
+							msgTimestamp.Format("2006-01-02 15:04:05"), sender, chatJID, mediaType, filename, len(content))
 					} else {
-						logger.Infof("Stored message: [%s] %s -> %s: %s",
-							msgTimestamp.Format("2006-01-02 15:04:05"), sender, chatJID, content)
+						logger.Infof("Stored message: [%s] %s -> %s (len=%d)",
+							msgTimestamp.Format("2006-01-02 15:04:05"), sender, chatJID, len(content))
 					}
 				}
 			}
