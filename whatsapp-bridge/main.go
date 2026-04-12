@@ -1321,7 +1321,7 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 
 	// Create server with timeouts for stability.
 	// Handler is wrapped in bearerAuthMiddleware so every route (except
-	// /api/health) requires Authorization: Bearer <BRIDGE_AUTH_TOKEN>.
+	// /api/health) requires Authorization: Bearer <BRIDGE_API_TOKEN>.
 	server := &http.Server{
 		Addr:         serverAddr,
 		Handler:      bearerAuthMiddleware(http.DefaultServeMux),

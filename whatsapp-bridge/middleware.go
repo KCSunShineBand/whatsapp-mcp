@@ -16,13 +16,13 @@ import (
 // bearerAuthMiddleware enforces Authorization: Bearer <token> on all routes
 // except /api/health (which stays public for uptime probes).
 //
-// The token is read from BRIDGE_AUTH_TOKEN. If unset, the bridge refuses
+// The token is read from BRIDGE_API_TOKEN. If unset, the bridge refuses
 // to start — we will not run an unauthenticated WhatsApp send endpoint
 // on the public internet.
 func bearerAuthMiddleware(next http.Handler) http.Handler {
-	token := os.Getenv("BRIDGE_AUTH_TOKEN")
+	token := os.Getenv("BRIDGE_API_TOKEN")
 	if token == "" {
-		panic("BRIDGE_AUTH_TOKEN must be set — refusing to start bridge without auth")
+		panic("BRIDGE_API_TOKEN must be set — refusing to start bridge without auth")
 	}
 	expected := []byte("Bearer " + token)
 
@@ -41,10 +41,10 @@ func bearerAuthMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// signPayload returns "sha256=<hex>" HMAC of body using WEBHOOK_SIGNING_SECRET.
+// signPayload returns "sha256=<hex>" HMAC of body using WEBHOOK_SECRET.
 // Returns "" if the secret is unset (webhook signing disabled).
 func signPayload(body []byte) string {
-	secret := os.Getenv("WEBHOOK_SIGNING_SECRET")
+	secret := os.Getenv("WEBHOOK_SECRET")
 	if secret == "" {
 		return ""
 	}
@@ -55,7 +55,7 @@ func signPayload(body []byte) string {
 
 // postWebhookWithRetry POSTs body to url with exponential-backoff retry
 // (3 attempts, 500ms/1s/2s). It signs the payload with HMAC-SHA256 if
-// WEBHOOK_SIGNING_SECRET is set and sets X-Signature + X-Delivery-Attempt
+// WEBHOOK_SECRET is set and sets X-Signature + X-Delivery-Attempt
 // headers. 4xx responses are treated as permanent and not retried.
 func postWebhookWithRetry(url string, body []byte) error {
 	if url == "" {
