@@ -292,12 +292,38 @@ cd /opt/bridge && sudo docker compose down
 
 ## Post-deployment checklist
 
-- [ ] Bridge health returns 200
-- [ ] QR code paired successfully
-- [ ] DNS resolves: `dig bridge.leon-global.com`
-- [ ] TLS working: `curl -I https://bridge.leon-global.com/api/health`
-- [ ] Webhook delivered to Vercel (check function logs)
-- [ ] Test ticket created via WhatsApp
-- [ ] All Vercel secrets rotated
+- [x] Bridge health returns 200 ✅ `{"connected":true,"status":"ok"}`
+- [x] QR code paired successfully ✅ Session stored in `/opt/bridge/data/`
+- [x] DNS resolves: `dig bridge.leon-global.com` ✅ → 34.143.178.50
+- [x] TLS working: `curl -I https://bridge.leon-global.com/api/health` ✅ Let's Encrypt via Caddy
+- [x] Webhook delivered to Vercel (check function logs) ✅ POST 200
+- [x] Test ticket created via WhatsApp ✅ TKT-0034, TKT-0035, TKT-0036
+- [x] Core Vercel secrets rotated ✅ (WEBHOOK_SECRET, BRIDGE_TOKEN, CRON_SECRET)
+- [x] `WHATSAPP_TICKET_INTAKE_GROUP_JID` set ✅ `120363406883985399@g.us`
+- [x] `WHATSAPP_BRIDGE_URL` set ✅ `https://bridge.leon-global.com`
+- [ ] Remaining secrets rotated (Supabase, Google OAuth, SMTP, Anthropic, TickTick)
 - [ ] `ALLOW_SELF_TICKETS` removed from Vercel
-- [ ] Daily digest fires at 08:30 SGT
+- [ ] Daily digest fires at 08:30 SGT (verify next morning)
+
+## Deployment log
+
+**Completed: 2026-04-12 ~12:50 UTC (20:50 SGT)**
+
+| Detail | Value |
+|--------|-------|
+| GCP Project | `lgpl-wa-bridge` |
+| VM | `whatsapp-bridge` (e2-small, asia-southeast1-b) |
+| Static IP | `34.143.178.50` |
+| Domain | `bridge.leon-global.com` |
+| Service Account | `215465002048-compute@developer.gserviceaccount.com` |
+| Docker images | `bridge-bridge:latest` (Go multi-stage) + `caddy:2.8-alpine` |
+| Secrets | GCP Secret Manager: `whatsapp-bridge-api-token`, `whatsapp-webhook-secret` |
+| Disk snapshots | Daily, 7-day retention |
+| `FORWARD_SELF` | `true` (self-filter handled by Vercel webhook handler) |
+
+**Issues encountered during deployment:**
+1. Ubuntu `docker-compose-plugin` not in default repos → bootstrap uses Docker's official repo (self-healing)
+2. `gcp-bridge/` directory not in repo → committed and pushed before VM clone
+3. `BRIDGE_AUTH_TOKEN` vs `BRIDGE_API_TOKEN` mismatch in middleware.go → fixed and pushed
+4. `FORWARD_SELF=false` blocked test messages from operator's own account → changed to `true`
+5. `WHATSAPP_TICKET_INTAKE_GROUP_JID` not set in Vercel → added after first test

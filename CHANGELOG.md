@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — feat/leonglobal-hardening
+
+### Added
+- `gcp-bridge/bootstrap.sh` — automated VM setup script for GCP deployment
+  (Docker, Caddy, GCP Secret Manager integration, docker-compose).
+- `gcp-bridge/DEPLOY-RUNBOOK.md` — 10-step deployment guide for
+  `bridge.leon-global.com`.
+- `whatsapp-bridge/middleware.go` — bearer auth middleware (`BRIDGE_API_TOKEN`),
+  HMAC payload signing (`WEBHOOK_SECRET`), webhook retry with exponential backoff.
+- `whatsapp-bridge/Dockerfile` — multi-stage build (golang:1.24-alpine → alpine:3.20)
+  with FFmpeg, SQLite, and tzdata.
+
+### Changed
+- `webhook.go` — outbound webhooks now signed with HMAC-SHA256 when
+  `WEBHOOK_SECRET` is set. Adds `X-Signature: sha256=<hex>` header.
+- `webhook.go` — replaced `http.DefaultClient` (no timeout) with a dedicated
+  `webhookClient` with 10-second timeout.
+- `main.go` — HTTP server binds to `127.0.0.1:<port>` instead of `0.0.0.0`
+  (Caddy reverse proxy handles external traffic).
+- `main.go` — message content replaced with `len(content)` in log output (privacy).
+- `main.go` — `media_path` validated with `filepath.Clean` + `..` segment
+  rejection before `os.ReadFile` (path traversal fix).
+
+### Fixed
+- `middleware.go` — aligned env var names: `BRIDGE_AUTH_TOKEN` → `BRIDGE_API_TOKEN`,
+  `WEBHOOK_SIGNING_SECRET` → `WEBHOOK_SECRET` to match `main.go`, `webhook.go`,
+  and deployment scripts.
+
+### Security
+- Bearer token authentication on all `/api/*` endpoints except `/api/health`.
+- Path traversal prevention on media file access.
+- HMAC-SHA256 webhook signing for downstream verification.
+- Server bound to localhost only — external access via Caddy with TLS.
+
+---
+
 ## 0.1.0 (2026-03-02)
 
 ### Added

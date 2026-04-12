@@ -57,7 +57,7 @@ cat > /opt/bridge/.env <<EOF
 BRIDGE_API_TOKEN=$BRIDGE_API_TOKEN
 WEBHOOK_SECRET=$WEBHOOK_SECRET
 WEBHOOK_URL=https://tickets.leon-global.com/api/webhooks/whatsapp
-FORWARD_SELF=false
+FORWARD_SELF=true
 WHATSAPP_BRIDGE_PORT=8080
 EOF
 chmod 600 /opt/bridge/.env
