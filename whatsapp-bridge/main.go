@@ -817,20 +817,10 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		return
 	}
 
-	// Auto-download media if present
-	if mediaType != "" && url != "" && len(mediaKey) > 0 {
-		logger.Infof("Auto-downloading %s media for message %s", mediaType, msg.Info.ID)
-		go func() {
-			success, _, _, downloadPath, err := downloadMedia(client, messageStore, msg.Info.ID, chatJID)
-			if success && err == nil {
-				logger.Infof("✅ Auto-downloaded media: %s", downloadPath)
-			} else {
-				logger.Warnf("❌ Auto-download failed: %v", err)
-			}
-		}()
-	}
-
-	// Store message in database
+	// Store message in database FIRST so the auto-download goroutine and any
+	// downstream webhook consumer can both look up the row by msg.Info.ID
+	// without racing the INSERT (LL-0029 secondary bug: "Auto-download failed:
+	// failed to find message: sql: no rows in result set").
 	err = messageStore.StoreMessage(
 		msg.Info.ID,
 		chatJID,
@@ -847,10 +837,27 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		fileLength,
 	)
 
-	// Send webhook for incoming messages
-	// Forward self-messages when FORWARD_SELF=true
-	if content != "" && (forwardSelfMessages || !msg.Info.IsFromMe) {
-		SendWebhook(sender, content, chatJID, msg.Info.IsFromMe, quotedMessageId, quotedSender, quotedContent)
+	// Auto-download media if present. Runs after StoreMessage so the row
+	// exists by the time downloadMedia's SELECT runs.
+	if mediaType != "" && url != "" && len(mediaKey) > 0 {
+		logger.Infof("Auto-downloading %s media for message %s", mediaType, msg.Info.ID)
+		go func() {
+			success, _, _, downloadPath, err := downloadMedia(client, messageStore, msg.Info.ID, chatJID)
+			if success && err == nil {
+				logger.Infof("✅ Auto-downloaded media: %s", downloadPath)
+			} else {
+				logger.Warnf("❌ Auto-download failed: %v", err)
+			}
+		}()
+	}
+
+	// Send webhook for incoming messages.
+	// Fires when there is either text content OR a media payload (LL-0029
+	// primary bug: media-only messages had empty content and were silently
+	// dropped at this gate, never reaching the downstream router/Supabase).
+	// Forwards self-messages when FORWARD_SELF=true.
+	if (content != "" || mediaType != "") && (forwardSelfMessages || !msg.Info.IsFromMe) {
+		SendWebhook(sender, content, chatJID, msg.Info.IsFromMe, mediaType, msg.Info.ID, quotedMessageId, quotedSender, quotedContent)
 	}
 
 	if err != nil {
