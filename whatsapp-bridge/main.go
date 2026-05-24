@@ -1120,16 +1120,29 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 		fmt.Println("WARNING: BRIDGE_API_TOKEN is not set — REST endpoints are unauthenticated")
 	}
 
-	// Health check endpoint (public, no auth)
+	// Health check endpoint (public, no auth).
+	//
+	// LL-0041 fix: a logged-out session (device_removed, manual unlink, server-side
+	// session revoke) leaves IsConnected() = true but the bridge cannot send or
+	// receive messages. Surface this separately so uptime monitoring catches the
+	// silent-logout failure mode. Field `whatsapp_connected` is the single boolean
+	// downstream uptime checks should body-match on (true = healthy end-to-end).
 	http.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		connected := client.IsConnected()
+		loggedIn := client.IsLoggedIn()
 		status := map[string]interface{}{
-			"status":    "ok",
-			"connected": client.IsConnected(),
-			"timestamp": time.Now().Unix(),
+			"status":             "ok",
+			"connected":          connected,
+			"logged_in":          loggedIn,
+			"whatsapp_connected": connected && loggedIn,
+			"timestamp":          time.Now().Unix(),
 		}
-		if !client.IsConnected() {
+		if !connected {
 			status["status"] = "disconnected"
+			w.WriteHeader(http.StatusServiceUnavailable)
+		} else if !loggedIn {
+			status["status"] = "logged_out"
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
 		_ = json.NewEncoder(w).Encode(status)
