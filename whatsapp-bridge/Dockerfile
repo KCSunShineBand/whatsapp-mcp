@@ -3,7 +3,7 @@
 # The whatsmeow library uses go-sqlite3 which requires CGO, so the build
 # stage uses alpine with gcc/musl-dev and the runtime stage has sqlite-libs.
 
-FROM golang:1.24-alpine AS build
+FROM golang:1.25-alpine AS build
 RUN apk add --no-cache git gcc musl-dev sqlite-dev
 WORKDIR /src
 COPY go.mod go.sum ./
