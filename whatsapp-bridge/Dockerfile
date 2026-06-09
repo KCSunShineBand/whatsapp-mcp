@@ -5,6 +5,12 @@
 
 FROM golang:1.25-alpine AS build
 RUN apk add --no-cache git gcc musl-dev sqlite-dev
+# proxy.golang.org times out on TLS handshake from this VM (asia-southeast1).
+# Fetch modules direct from each origin (github.com, go.mau.fi, golang.org/x)
+# which are all reachable. GOSUMDB off because the sumdb is also fronted by
+# the proxy.
+ENV GOPROXY=direct
+ENV GOSUMDB=off
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
